@@ -16,6 +16,8 @@ void Usage(const char *name) {
     "-v summary|sentence|word: Print statistics at this level.\n"
     "   Can be used multiple times: -v summary -v sentence -v word\n"
     "-l lazy|populate|read|parallel: Load lazily, with populate, or malloc+read\n"
+    "-o bytes: The binary model starts this many bytes into the file.  The offset has to\n"
+    "   be a multiple of the page size, unless loading with -l read.\n"
     "The default loading method is populate on Linux and read on others.\n\n"
     "Each word in the output is formatted as:\n"
     "  word=vocab_id ngram_length log10(p(word|context))\n"
@@ -37,7 +39,7 @@ int main(int argc, char *argv[]) {
   bool flush = false;
 
   int opt;
-  while ((opt = getopt(argc, argv, "bnv:l:")) != -1) {
+  while ((opt = getopt(argc, argv, "bnv:l:o:")) != -1) {
     switch (opt) {
       case 'b':
         flush = true;
@@ -81,6 +83,13 @@ int main(int argc, char *argv[]) {
           Usage(argv[0]);
         }
         break;
+      case 'o':
+        {
+          char *end;
+          config.file_offset = strtoull(optarg, &end, 10);
+          if (*optarg == '\0' || *end != '\0') Usage(argv[0]);
+        }
+        break;
       case 'h':
       default:
         Usage(argv[0]);
@@ -99,7 +108,7 @@ int main(int argc, char *argv[]) {
   try {
     using namespace lm::ngram;
     ModelType model_type;
-    if (RecognizeBinary(file, model_type)) {
+    if (RecognizeBinary(file, model_type, config.file_offset)) {
       std::cerr << "This binary file contains " << lm::ngram::kModelNames[model_type] << "." << std::endl;
       switch(model_type) {
         case PROBING:
