@@ -82,25 +82,25 @@ void WriteHeader(void *to, const Parameters &params) {
 
 } // namespace
 
-bool IsBinaryFormat(int fd) {
+bool IsBinaryFormat(int fd, uint64_t file_offset) {
   const uint64_t size = util::SizeFile(fd);
-  if (size == util::kBadSize || (size <= static_cast<uint64_t>(sizeof(Sanity)))) return false;
-  // Try reading the header.
-  util::scoped_memory memory;
+  if (size == util::kBadSize || (size <= file_offset) || (size - file_offset <= static_cast<uint64_t>(sizeof(Sanity)))) return false;
+  // Try reading the header.  This is a read, not a map, so the offset need not be aligned.
+  char header[sizeof(Sanity)];
   try {
-    util::MapRead(util::LAZY, fd, 0, sizeof(Sanity), memory);
+    util::ErsatzPRead(fd, header, sizeof(Sanity), file_offset);
   } catch (const util::Exception &e) {
     return false;
   }
   Sanity reference_header = Sanity();
   reference_header.SetToReference();
-  if (!std::memcmp(memory.get(), &reference_header, sizeof(Sanity))) return true;
-  if (!std::memcmp(memory.get(), kMagicIncomplete, strlen(kMagicIncomplete))) {
+  if (!std::memcmp(header, &reference_header, sizeof(Sanity))) return true;
+  if (!std::memcmp(header, kMagicIncomplete, strlen(kMagicIncomplete))) {
     UTIL_THROW(FormatLoadException, "This binary file did not finish building");
   }
-  if (!std::memcmp(memory.get(), kMagicBeforeVersion, strlen(kMagicBeforeVersion))) {
+  if (!std::memcmp(header, kMagicBeforeVersion, strlen(kMagicBeforeVersion))) {
     char *end_ptr;
-    const char *begin_version = static_cast<const char*>(memory.get()) + strlen(kMagicBeforeVersion);
+    const char *begin_version = header + strlen(kMagicBeforeVersion);
     long int version = std::strtol(begin_version, &end_ptr, 10);
     if ((end_ptr != begin_version) && version != kMagicVersion) {
       UTIL_THROW(FormatLoadException, "Binary file has version " << version << " but this implementation expects version " << kMagicVersion << " so you'll have to use the ARPA to rebuild your binary");
@@ -108,14 +108,14 @@ bool IsBinaryFormat(int fd) {
 
     OldSanity old_sanity = OldSanity();
     old_sanity.SetToReference();
-    UTIL_THROW_IF(!std::memcmp(memory.get(), &old_sanity, sizeof(OldSanity)), FormatLoadException, "Looks like this is an old 32-bit format.  The old 32-bit format has been removed so that 64-bit and 32-bit files are exchangeable.");
+    UTIL_THROW_IF(!std::memcmp(header, &old_sanity, sizeof(OldSanity)), FormatLoadException, "Looks like this is an old 32-bit format.  The old 32-bit format has been removed so that 64-bit and 32-bit files are exchangeable.");
     UTIL_THROW(FormatLoadException, "File looks like it should be loaded with mmap, but the test values don't match.  Try rebuilding the binary format LM using the same code revision, compiler, and architecture");
   }
   return false;
 }
 
-void ReadHeader(int fd, Parameters &out) {
-  util::SeekOrThrow(fd, sizeof(Sanity));
+void ReadHeader(int fd, uint64_t file_offset, Parameters &out) {
+  util::SeekOrThrow(fd, file_offset + sizeof(Sanity));
   util::ReadOrThrow(fd, &out.fixed, sizeof(out.fixed));
   if (out.fixed.probing_multiplier < 1.0)
     UTIL_THROW(FormatLoadException, "Binary format claims to have a probing multiplier of " << out.fixed.probing_multiplier << " which is < 1.0.");
@@ -136,20 +136,20 @@ void MatchCheck(ModelType model_type, unsigned int search_version, const Paramet
 const std::size_t kInvalidSize = static_cast<std::size_t>(-1);
 
 BinaryFormat::BinaryFormat(const Config &config)
-  : write_method_(config.write_method), write_mmap_(config.write_mmap), load_method_(config.load_method),
+  : write_method_(config.write_method), write_mmap_(config.write_mmap), load_method_(config.load_method), file_offset_(config.file_offset),
     header_size_(kInvalidSize), vocab_size_(kInvalidSize), vocab_string_offset_(kInvalidOffset) {}
 
 void BinaryFormat::InitializeBinary(int fd, ModelType model_type, unsigned int search_version, Parameters &params) {
   file_.reset(fd);
   write_mmap_ = NULL; // Ignore write requests; this is already in binary format.
-  ReadHeader(fd, params);
+  ReadHeader(fd, file_offset_, params);
   MatchCheck(model_type, search_version, params);
   header_size_ = TotalHeaderSize(params.counts.size());
 }
 
 void BinaryFormat::ReadForConfig(void *to, std::size_t amount, uint64_t offset_excluding_header) const {
   assert(header_size_ != kInvalidSize);
-  util::ErsatzPRead(file_.get(), to, amount, offset_excluding_header + header_size_);
+  util::ErsatzPRead(file_.get(), to, amount, file_offset_ + offset_excluding_header + header_size_);
 }
 
 void *BinaryFormat::LoadBinary(std::size_t size) {
@@ -157,11 +157,14 @@ void *BinaryFormat::LoadBinary(std::size_t size) {
   const uint64_t file_size = util::SizeFile(file_.get());
   // The header is smaller than a page, so we have to map the whole header as well.
   uint64_t total_map = static_cast<uint64_t>(header_size_) + static_cast<uint64_t>(size);
-  UTIL_THROW_IF(file_size != util::kBadSize && file_size < total_map, FormatLoadException, "Binary file has size " << file_size << " but the headers say it should be at least " << total_map);
+  UTIL_THROW_IF(file_size != util::kBadSize && (file_size < file_offset_ || file_size - file_offset_ < total_map), FormatLoadException, "Binary file has size " << file_size << " but the headers say it should be at least " << total_map << " starting at offset " << file_offset_);
+  // mmap wants page aligned offsets, and for the lazy and populate methods we would rather say so than fail inside mmap.
+  // READ has no such need.  Never quietly read a mapping in: the point of mapping a file is to share it.
+  UTIL_THROW_IF(load_method_ != util::READ && file_offset_ % util::SizePage(), FormatLoadException, "Binary file offset " << file_offset_ << " is not a multiple of the page size " << util::SizePage() << " so it cannot be mapped.  Align the data in the file or load with the READ method.");
 
-  util::MapRead(load_method_, file_.get(), 0, util::CheckOverflow(total_map), mapping_);
+  util::MapRead(load_method_, file_.get(), file_offset_, util::CheckOverflow(total_map), mapping_);
 
-  vocab_string_offset_ = total_map;
+  vocab_string_offset_ = file_offset_ + total_map;
   return reinterpret_cast<uint8_t*>(mapping_.get()) + header_size_;
 }
 
@@ -287,13 +290,13 @@ void BinaryFormat::MapFile(void *&vocab_base, void *&search_base) {
   search_base = reinterpret_cast<uint8_t*>(mapping_.get()) + header_size_ + vocab_size_ + vocab_pad_;
 }
 
-bool RecognizeBinary(const char *file, ModelType &recognized) {
+bool RecognizeBinary(const char *file, ModelType &recognized, uint64_t file_offset) {
   util::scoped_fd fd(util::OpenReadOrThrow(file));
-  if (!IsBinaryFormat(fd.get())) {
+  if (!IsBinaryFormat(fd.get(), file_offset)) {
     return false;
   }
   Parameters params;
-  ReadHeader(fd.get(), params);
+  ReadHeader(fd.get(), file_offset, params);
   recognized = params.fixed.model_type;
   return true;
 }

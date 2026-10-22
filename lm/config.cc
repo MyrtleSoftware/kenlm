@@ -24,7 +24,8 @@ Config::Config() :
   prob_bits(8),
   backoff_bits(8),
   pointer_bhiksha_bits(22),
-  load_method(util::POPULATE_OR_READ) {}
+  load_method(util::POPULATE_OR_READ),
+  file_offset(0) {}
 
 } // namespace ngram
 } // namespace lm

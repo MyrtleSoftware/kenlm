@@ -114,6 +114,12 @@ struct Config {
   // See util/mmap.hh for details of MapMethod.
   util::LoadMethod load_method;
 
+  // The binary model starts this many bytes into the file, which may have
+  // other data before it and after it (e.g. it can be a member of an
+  // uncompressed archive).  The offset has to be a multiple of the page size
+  // unless load_method is READ, because the model is mmapped from there.
+  // Binary files only; the default, 0, is a plain binary file.
+  uint64_t file_offset;
 
   // Set defaults.
   Config();

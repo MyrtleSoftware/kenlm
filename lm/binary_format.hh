@@ -22,8 +22,9 @@ extern const char *kModelNames[6];
 /*Inspect a file to determine if it is a binary lm.  If not, return false.
  * If so, return true and set recognized to the type.  This is the only API in
  * this header designed for use by decoder authors.
+ * file_offset is where the binary lm starts in the file, see Config::file_offset.
  */
-bool RecognizeBinary(const char *file, ModelType &recognized);
+bool RecognizeBinary(const char *file, ModelType &recognized, uint64_t file_offset = 0);
 
 struct FixedWidthParameters {
   unsigned char order;
@@ -56,6 +57,7 @@ class BinaryFormat {
     // Actually load the binary file and return a pointer to the beginning of the search area.
     void *LoadBinary(std::size_t size);
 
+    // Offset in the file (not relative to file_offset) of the vocabulary strings.
     uint64_t VocabStringReadingOffset() const {
       assert(vocab_string_offset_ != kInvalidOffset);
       return vocab_string_offset_;
@@ -79,6 +81,9 @@ class BinaryFormat {
     const char *write_mmap_;
     util::LoadMethod load_method_;
 
+    // Where the binary lm starts in the file, see Config::file_offset.
+    const uint64_t file_offset_;
+
     // File behind memory, if any.
     util::scoped_fd file_;
 
@@ -99,7 +104,8 @@ class BinaryFormat {
     static const uint64_t kInvalidOffset = (uint64_t)-1;
 };
 
-bool IsBinaryFormat(int fd);
+// file_offset is where the binary lm would start, see Config::file_offset.
+bool IsBinaryFormat(int fd, uint64_t file_offset = 0);
 
 } // namespace ngram
 } // namespace lm

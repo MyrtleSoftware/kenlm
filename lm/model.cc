@@ -58,7 +58,7 @@ void CheckCounts(const std::vector<uint64_t> &counts) {
 
 template <class Search, class VocabularyT> GenericModel<Search, VocabularyT>::GenericModel(const char *file, const Config &init_config) : backing_(init_config) {
   util::scoped_fd fd(util::OpenReadOrThrow(file));
-  if (IsBinaryFormat(fd.get())) {
+  if (IsBinaryFormat(fd.get(), init_config.file_offset)) {
     Parameters parameters;
     int fd_shallow = fd.release();
     backing_.InitializeBinary(fd_shallow, kModelType, kVersion, parameters);
@@ -72,6 +72,7 @@ template <class Search, class VocabularyT> GenericModel<Search, VocabularyT>::Ge
     SetupMemory(backing_.LoadBinary(Size(parameters.counts, new_config)), parameters.counts, new_config);
     vocab_.LoadedBinary(parameters.fixed.has_vocabulary, fd_shallow, new_config.enumerate_vocab, backing_.VocabStringReadingOffset());
   } else {
+    UTIL_THROW_IF(init_config.file_offset, FormatLoadException, "Config::file_offset is " << init_config.file_offset << " but there is no binary model at that offset of " << file << ".  Only binary models can be loaded from an offset.");
     ComplainAboutARPA(init_config, kModelType);
     InitializeFromARPA(fd.release(), file, init_config);
   }
@@ -326,7 +327,7 @@ template class GenericModel<trie::TrieSearch<SeparatelyQuantize, trie::ArrayBhik
 } // namespace detail
 
 base::Model *LoadVirtual(const char *file_name, const Config &config, ModelType model_type) {
-  RecognizeBinary(file_name, model_type);
+  RecognizeBinary(file_name, model_type, config.file_offset);
   switch (model_type) {
     case PROBING:
       return new ProbingModel(file_name, config);
