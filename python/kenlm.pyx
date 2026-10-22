@@ -118,6 +118,17 @@ cdef class Config:
         def __set__(self, to):
             self._c_config.arpa_complain = to
 
+    property file_offset:
+        """
+        Load the binary model that starts this many bytes into the file, which
+        may have other data before and after it.  Must be a multiple of the page
+        size unless load_method is READ.  Binary models only.
+        """
+        def __get__(self):
+            return self._c_config.file_offset
+        def __set__(self, to):
+            self._c_config.file_offset = to
+
 cdef class Model:
     """
     Wrapper around lm::ngram::Model.

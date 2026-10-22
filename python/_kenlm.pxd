@@ -1,3 +1,4 @@
+from libc.stdint cimport uint64_t
 from libcpp cimport bool
 
 cdef extern from "lm/word_index.hh" namespace "lm":
@@ -53,6 +54,7 @@ cdef extern from "lm/config.hh" namespace "lm::ngram":
         bool show_progress
         ARPALoadComplain arpa_complain
         float unknown_missing_logprob
+        uint64_t file_offset
 
 cdef extern from "lm/model.hh" namespace "lm::ngram":
     cdef Model *LoadVirtual(char *, Config &config) except +
