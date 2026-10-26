@@ -113,6 +113,20 @@ template <class M> void TrailingBytesTest() {
     BOOST_CHECK_THROW(M(trailed.c_str(), config), util::Exception);
   }
 
+  // Dropping just the last vocabulary string leaves the model data intact, so only the
+  // vocabulary count can catch it.
+  {
+    BOOST_REQUIRE_EQUAL('\0', binary[binary.size() - 1]);
+    const std::size_t last_word = binary.find_last_of('\0', binary.size() - 2);
+    BOOST_REQUIRE(last_word != std::string::npos);
+    WriteFile(trailed, binary.substr(0, last_word + 1));
+    CollectVocab vocab;
+    Config config;
+    config.messages = NULL;
+    config.enumerate_vocab = &vocab;
+    BOOST_CHECK_THROW(M(trailed.c_str(), config), util::Exception);
+  }
+
   std::remove(plain.c_str());
   std::remove(trailed.c_str());
 }
