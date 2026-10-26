@@ -46,9 +46,12 @@ void ReadWords(int fd, EnumerateVocab *enumerate, WordIndex expected_count, uint
 
   WordIndex index = 1; // Read <unk> already.
   util::FilePiece in(util::DupOrThrow(fd));
-  // Stop at the expected count: the file may have other data after the vocabulary.
-  for (util::LineIterator w(in, '\0'); w && index < expected_count; ++w, ++index) {
-    enumerate->Add(index, *w);
+  // Stop at the expected count: the file may have other data after the vocabulary, which
+  // can't be told apart from extra words, so don't advance past the last word.
+  util::LineIterator w(in, '\0');
+  while (index < expected_count && w) {
+    enumerate->Add(index++, *w);
+    if (index < expected_count) ++w;
   }
   UTIL_THROW_IF(expected_count != index, FormatLoadException, "The binary file has the wrong number of words at the end.  This could be caused by a truncated binary file.");
 }
